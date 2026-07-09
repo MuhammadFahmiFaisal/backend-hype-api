@@ -33,10 +33,10 @@ export const getProductReviews = async (req, res) => {
       return errorResponse(res, 'Produk tidak ditemukan.', 404);
     }
 
-    // Ambil reviews dengan data profil reviewer
+    // Ambil reviews TANPA JOIN langsung ke profiles (karena tidak ada foreign key langsung)
     const { data: reviews, count, error } = await supabaseAdmin
       .from('reviews')
-      .select('id, rating, comment, created_at, updated_at, profiles(id, full_name, avatar_url)', { count: 'exact' })
+      .select('id, user_id, rating, comment, created_at, updated_at', { count: 'exact' })
       .eq('product_id', productId)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
@@ -46,18 +46,34 @@ export const getProductReviews = async (req, res) => {
       return errorResponse(res, 'Gagal mengambil ulasan produk.', 500);
     }
 
-    // Format response — rename 'profiles' menjadi 'reviewer' agar lebih deskriptif
+    // Ambil data profiles secara manual
+    const userIds = reviews.map(r => r.user_id);
+    let profilesMap = {};
+    if (userIds.length > 0) {
+      const { data: profiles } = await supabaseAdmin
+        .from('profiles')
+        .select('id, full_name, avatar_url')
+        .in('id', userIds);
+        
+      if (profiles) {
+        profiles.forEach(p => {
+          profilesMap[p.id] = p;
+        });
+      }
+    }
+
+    // Format response
     const formattedReviews = reviews.map((review) => ({
       id: review.id,
       rating: review.rating,
       comment: review.comment,
-      reviewer: review.profiles
+      reviewer: profilesMap[review.user_id] 
         ? {
-            id: review.profiles.id,
-            full_name: review.profiles.full_name,
-            avatar_url: review.profiles.avatar_url,
+            id: profilesMap[review.user_id].id,
+            full_name: profilesMap[review.user_id].full_name,
+            avatar_url: profilesMap[review.user_id].avatar_url,
           }
-        : null,
+        : { full_name: 'Anonymous', avatar_url: '' },
       created_at: review.created_at,
       updated_at: review.updated_at,
     }));
